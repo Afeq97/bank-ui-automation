@@ -1,0 +1,106 @@
+# Test data - UAT ONLY. Never put real customer data here.
+# "${VAR}" values are resolved from environment variables / .env at load time,
+# so real (dummy UAT) usernames and account numbers live only in .env.
+#
+# expected_error / expected_message: case-insensitive substring of the message shown.
+# Set to null to only check that SOME error is shown. Update to match the real app's wording.
+
+limits:
+  daily_transfer_limit: "10000.00"
+  max_failed_login_attempts: 3
+  # Transaction reference format shown after a successful transfer (regex)
+  reference_pattern: "^[A-Za-z0-9-]{6,}$"
+
+login:
+  wrong_password:
+    - id: valid_user_wrong_password
+      username: "${TEST_USERNAME}"
+      password: "Wrong-Pass-123!"
+      expected_error: null
+  wrong_otp:
+    - id: wrong_otp
+      otp: "999999"
+      expected_error: null
+  lockout:
+    wrong_password: "Wrong-Pass-123!"
+    expected_message: "lock"
+  empty_fields:
+    - id: both_empty
+      username: ""
+      password: ""
+      expect_username_error: true
+      expect_password_error: true
+    - id: username_empty
+      username: ""
+      password: "AnyPass-123!"
+      expect_username_error: true
+      expect_password_error: false
+    - id: password_empty
+      username: "${TEST_USERNAME}"
+      password: ""
+      expect_username_error: false
+      expect_password_error: true
+
+transfer:
+  valid:
+    - id: own_account
+      type: own
+      from_account: "${FROM_ACCOUNT}"
+      to_account: "${OWN_TO_ACCOUNT}"
+      recipient_bank: null
+      amount: "1.00"
+      fee: "0.00"
+      description: "AUTO own transfer"
+    - id: third_party
+      type: third_party
+      from_account: "${FROM_ACCOUNT}"
+      to_account: "${THIRD_PARTY_ACCOUNT}"
+      # Visible text of the bank option, if the app asks for one
+      recipient_bank: null
+      amount: "1.50"
+      # Set if UAT charges a fee for third-party transfers, e.g. "0.10"
+      fee: "0.00"
+      description: "AUTO 3P transfer"
+
+  invalid_amounts:
+    - id: zero
+      type: third_party
+      amount: "0.00"
+      expected_error: null
+    - id: negative
+      type: third_party
+      amount: "-10.00"
+      expected_error: null
+    # Requires FROM_ACCOUNT balance > 10,000.01, otherwise the app may reject it
+    # as insufficient funds instead (still a rejection, different message).
+    - id: above_daily_limit
+      type: third_party
+      amount: "10000.01"
+      expected_error: null
+
+  # "More than balance": amount = current balance + this margin (computed at runtime)
+  over_balance:
+    type: own
+    margin: "1.00"
+    expected_error: null
+
+  invalid_recipients:
+    - id: non_existent_account
+      to_account: "000000000099"
+      expected_error: null
+    - id: invalid_format
+      to_account: "12AB34!"
+      expected_error: null
+    - id: too_short
+      to_account: "123"
+      expected_error: null
+    - id: empty
+      to_account: ""
+      expected_error: null
+  invalid_recipient_amount: "1.00"
+
+security:
+  protected_paths:
+    - /dashboard
+    - /transfer
+    - /transactions

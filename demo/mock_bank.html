@@ -1,0 +1,129 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock Bank UAT</title></head>
+<body><div id="app"></div>
+<script>
+const USER = "tester", PASS = "Passw0rd!", LOCK_USER = "locker", LOCK_PASS = "L0ckPass!", OTP = "123456";
+const OWN1 = "1111222233334444", OWN2 = "5555666677778888", TP = "9999888877776666";
+const IDLE_MS = 8000;
+const S = {
+  get: (k, d) => JSON.parse(localStorage.getItem(k) || JSON.stringify(d)),
+  set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+};
+if (!localStorage.getItem("bal")) S.set("bal", {[OWN1]: 15000, [OWN2]: 500});
+const fmt = n => "RM " + n.toLocaleString("en-MY", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const mask = a => "****" + a.slice(-4);
+const app = document.getElementById("app");
+const go = p => location.assign(p);
+const logged = () => sessionStorage.getItem("auth") === "1";
+const path = location.pathname;
+
+let idle;
+function resetIdle() { clearTimeout(idle); idle = setTimeout(() => { sessionStorage.removeItem("auth"); location.replace("/login?expired=1"); }, IDLE_MS); }
+
+function nav() {
+  return `<nav><a href="/transfer" data-testid="nav-transfer">Transfer</a> <a href="/transactions" data-testid="nav-transactions">History</a>
+  <button data-testid="logout" onclick="sessionStorage.removeItem('auth');location.replace('/login')">Logout</button></nav>`;
+}
+
+if (path !== "/login" && !logged()) location.replace("/login");
+else if (path === "/login") renderLogin();
+else {
+  ["click", "keydown", "mousemove"].forEach(e => document.addEventListener(e, resetIdle)); resetIdle();
+  if (path === "/dashboard") renderDashboard();
+  else if (path === "/transfer") renderTransfer();
+  else if (path === "/transactions") renderHistory();
+  else go("/dashboard");
+}
+
+function renderLogin() {
+  const expired = location.search.includes("expired") ? `<p data-testid="session-expired">Session expired</p>` : "";
+  app.innerHTML = `${expired}<h1>Login</h1>
+    <input id="username"><span data-testid="username-error"></span>
+    <input id="password" type="password"><span data-testid="password-error"></span>
+    <button data-testid="login-submit">Login</button><div data-testid="login-error"></div>
+    <div id="otp" style="display:none"><input data-testid="otp-input"><button data-testid="otp-submit">Verify</button><div data-testid="otp-error"></div></div>`;
+  const q = s => app.querySelector(s);
+  q('[data-testid="login-submit"]').onclick = () => {
+    const u = q("#username").value, p = q("#password").value;
+    q('[data-testid="username-error"]').textContent = u ? "" : "Username is required";
+    q('[data-testid="password-error"]').textContent = p ? "" : "Password is required";
+    q('[data-testid="login-error"]').textContent = "";
+    if (!u || !p) return;
+    const fails = S.get("fails", {});
+    if ((fails[u] || 0) >= 3) { q('[data-testid="login-error"]').textContent = "Your account is locked"; return; }
+    if ((u === USER && p === PASS) || (u === LOCK_USER && p === LOCK_PASS)) { fails[u] = 0; S.set("fails", fails); q("#otp").style.display = "block"; return; }
+    fails[u] = (fails[u] || 0) + 1; S.set("fails", fails);
+    setTimeout(() => q('[data-testid="login-error"]').textContent = "Invalid username or password", 300);
+  };
+  q('[data-testid="otp-submit"]').onclick = () => {
+    if (q('[data-testid="otp-input"]').value === OTP) { sessionStorage.setItem("auth", "1"); go("/dashboard"); }
+    else q('[data-testid="otp-error"]').textContent = "Invalid OTP";
+  };
+}
+
+function renderDashboard() {
+  const bal = S.get("bal", {});
+  setTimeout(() => {
+    app.innerHTML = nav() + `<h1 data-testid="welcome-banner">Welcome</h1>` + Object.entries(bal).map(([a, b]) =>
+      `<div data-testid="account-row"><span data-testid="account-number">Savings ${mask(a)}</span>
+       <span data-testid="account-balance">${fmt(b)}</span></div>`).join("");
+  }, 400);
+}
+
+function renderTransfer() {
+  const opts = [OWN1, OWN2].map(a => `<option value="${a}">Savings ${mask(a)}</option>`).join("");
+  app.innerHTML = nav() + `<h1>Transfer</h1>
+    <label><input type="radio" name="t" value="own" data-testid="transfer-type-own" checked>Own</label>
+    <label><input type="radio" name="t" value="tp" data-testid="transfer-type-third-party">Third party</label>
+    <select data-testid="from-account">${opts}</select>
+    <select data-testid="to-own-account">${opts}</select>
+    <input data-testid="recipient-account">
+    <input data-testid="transfer-amount"><span data-testid="amount-error"></span><span data-testid="recipient-error"></span>
+    <input data-testid="transfer-description">
+    <button data-testid="transfer-submit">Next</button><div data-testid="transfer-error"></div>
+    <div id="review" style="display:none"><button data-testid="transfer-confirm">Confirm</button></div>
+    <div id="tac" style="display:none"><input data-testid="transfer-otp-input"><button data-testid="transfer-otp-submit">Submit</button></div>
+    <div id="done" style="display:none"><p data-testid="transfer-success">Transfer successful</p><p data-testid="transfer-reference"></p></div>`;
+  const q = s => app.querySelector(s);
+  let pending;
+  q('[data-testid="transfer-submit"]').onclick = () => {
+    ["amount-error", "recipient-error", "transfer-error"].forEach(t => q(`[data-testid="${t}"]`).textContent = "");
+    const tp = q('[data-testid="transfer-type-third-party"]').checked;
+    const from = q('[data-testid="from-account"]').value;
+    const to = tp ? q('[data-testid="recipient-account"]').value : q('[data-testid="to-own-account"]').value;
+    const amt = Number(q('[data-testid="transfer-amount"]').value);
+    if (!(amt > 0)) return q('[data-testid="amount-error"]').textContent = "Enter a valid amount";
+    if (tp && !/^\d{10,16}$/.test(to)) return q('[data-testid="recipient-error"]').textContent = "Invalid account number";
+    if (tp && to !== TP) return q('[data-testid="recipient-error"]').textContent = "Account not found";
+    const bal = S.get("bal", {});
+    if (amt > bal[from]) return q('[data-testid="transfer-error"]').textContent = "Insufficient funds";
+    if (tp && amt > 10000) return q('[data-testid="transfer-error"]').textContent = "Exceeds daily limit";
+    pending = {from, to, amt, tp, desc: q('[data-testid="transfer-description"]').value};
+    q("#review").style.display = "block";
+  };
+  const complete = () => {
+    const bal = S.get("bal", {}); bal[pending.from] = Math.round((bal[pending.from] - pending.amt) * 100) / 100;
+    if (!pending.tp) bal[pending.to] = Math.round((bal[pending.to] + pending.amt) * 100) / 100;
+    S.set("bal", bal);
+    const n = S.get("seq", 1000) + 1; S.set("seq", n); const ref = "TXN" + n;
+    const tx = S.get("tx", []); tx.unshift({ref, amt: -pending.amt, desc: pending.desc, date: "2026-10-15"}); S.set("tx", tx);
+    q("#review").style.display = "none"; q("#tac").style.display = "none";
+    q('[data-testid="transfer-reference"]').textContent = ref; q("#done").style.display = "block";
+  };
+  q('[data-testid="transfer-confirm"]').onclick = () => {
+    q("#review").style.display = "none";
+    if (pending.tp) q("#tac").style.display = "block"; else setTimeout(complete, 300);
+  };
+  q('[data-testid="transfer-otp-submit"]').onclick = () => {
+    if (q('[data-testid="transfer-otp-input"]').value === OTP) complete();
+    else q('[data-testid="transfer-error"]').textContent = "Invalid TAC";
+  };
+}
+
+function renderHistory() {
+  const tx = S.get("tx", []);
+  app.innerHTML = nav() + `<table data-testid="transaction-table"><tr><th>Date</th><th>Ref</th><th>Desc</th><th>Amount</th></tr>` +
+    tx.map(t => `<tr data-testid="transaction-row"><td data-testid="txn-date">${t.date}</td><td data-testid="txn-reference">${t.ref}</td>
+      <td data-testid="txn-description">${t.desc}</td><td data-testid="txn-amount">${t.amt < 0 ? "-" : ""}${fmt(Math.abs(t.amt))}</td></tr>`).join("") + `</table>`;
+}
+</script></body></html>
